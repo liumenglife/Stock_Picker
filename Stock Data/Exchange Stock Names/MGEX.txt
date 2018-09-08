@@ -1,0 +1,42 @@
+Symbol	Description
+AJ.C	AJC Continuation
+AJF16	AJC {Jan 16}
+AJH16	AJC {Mar 16}
+AJX15	AJC {Nov 15}
+DW	Durum Wheat
+IC	NCI National Corn
+IC.C	NCI National Corn Continuation
+ICF16	NCI National Corn {Jan 16}
+ICX15	NCI National Corn {Nov 15}
+ICZ15	NCI National Corn {Dec 15}
+IH	HRWI Hard Red
+IH.C	HRWI Hard Red Continuation
+IHF16	HRWI Hard Red {Jan 16}
+IHX15	HRWI Hard Red {Nov 15}
+IHZ15	HRWI Hard Red {Dec 15}
+IP	HRSI Hard Red Spring
+IP.C	HRSI Hard Red Spring Continuation
+IPF16	HRSI Hard Red Spring {Jan 16}
+IPX15	HRSI Hard Red Spring {Nov 15}
+IPZ15	HRSI Hard Red Spring {Dec 15}
+IS	NSI National Soybean
+IS.C	NSI National Soybean Continuation
+ISF16	NSI National Soybean {Jan 16}
+ISX15	NSI National Soybean {Nov 15}
+ISZ15	NSI National Soybean {Dec 15}
+IW	SRWI Soft Red Wheat
+IW.C	SRWI Soft Red Wheat Continuation
+IWF16	SRWI Soft Red Wheat {Jan 16}
+IWX15	SRWI Soft Red Wheat {Nov 15}
+IWZ15	SRWI Soft Red Wheat {Dec 15}
+MW	Spring Wheat
+MW.C	Spring Wheat Continuation
+MWH16	Spring Wheat {Mar 16}
+MWH17	Spring Wheat {Mar 17}
+MWK16	Spring Wheat {May 16}
+MWK17	Spring Wheat {May 17}
+MWN16	Spring Wheat {Jul 16}
+MWU16	Spring Wheat {Sep 16}
+MWZ15	Spring Wheat {Dec 15}
+MWZ16	Spring Wheat {Dec 16}
+NW	White Wheat

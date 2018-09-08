@@ -1,0 +1,706 @@
+##
+## Innovative Comparison Calculator by Elias
+##
+import math
+import random
+from pprint import pprint
+import json
+import unicodedata
+import feedparser
+import bs4
+from bs4 import BeautifulSoup
+import urllib
+import datetime
+import argparse
+import threading
+import os
+import time
+import winsound
+import webbrowser
+import json
+import csv
+from os import listdir
+from os.path import isfile, join
+
+
+
+######################################################################
+##Stock class, for eaech instance of a code; doesn't
+##load all variables unless requested however
+######################################################################
+    
+class stock(object):
+    def __init__(self, __stockExchange, __stockCode, __associateData = {}, headers = [],
+                 openLink = False, __RSSstockUrl = None, __rawStockData = [], __modStockData = [],
+                 __stockFile = urllib.URLopener(), __mostRecentParsed = None, __RSSDataDict = None,
+                 __crossovers = [], americaExList = [], __currentRSSDD = None):
+        self.__stockExchange = __stockExchange.upper()
+        if self.__stockExchange == "LSE":
+            self.__stockExchange = "LON"
+        self.__stockCode = __stockCode.upper()
+        self.__RSSstockUrl = None
+        self.openLink = False
+        self.__stockFile = urllib.URLopener()
+        self.__RSSDataDict = __RSSDataDict
+        #current stock data dict
+        self.__currentRSSDD = {}
+        
+        self.__rawStockData = []
+        self.__modStockData = []
+        self.__crossovers = []
+        self.americaExList = ["NASDAQ", "NYSE", "AMEX"]
+        self.__associateData = {}
+        self.__headers = ["Date", "Open", "High", "Low", "Close", "Volume", "Open ratio change",
+                          "High ratio change", "Low ratio change", "Close ratio change", "Volume ratio change"]
+        self.openLink = openLink
+        self.add_associate_data("Google Finance Url", "https://www.google.com/finance?q=" + self.__stockExchange + ":" + self.__stockCode)
+        #self.__RSS_load_dict()
+
+
+            
+    def convert_date(self, inpDate):
+        #Extending list of no "0" prefix for units
+        if inpDate[1] == "-":
+            inpDate = "0" + inpDate
+
+        #Day
+        returnDay = inpDate[:2]
+
+        #Month
+        month = inpDate[3:6]
+        returnMonth = ""
+        if month == "Jan": returnMonth = "01"
+        if month == "Feb": returnMonth = "02"
+        if month == "Mar": returnMonth = "03"
+        if month == "Apr": returnMonth = "04"
+        if month == "May": returnMonth = "05"
+        if month == "Jun": returnMonth = "06"
+        if month == "Jul": returnMonth = "07"
+        if month == "Aug": returnMonth = "08"
+        if month == "Sep": returnMonth = "09"
+        if month == "Oct": returnMonth = "10"
+        if month == "Nov": returnMonth = "11"
+        if month == "Dec": returnMonth = "12"
+
+        #Year
+        returnYear = "20" + inpDate[7:]
+
+        #Return
+        return returnYear + "-" + returnMonth + "-" + returnDay
+
+    #NOTE: ignore change ratios on last result
+    #Price spreadsheets functions
+    def load_price_sheet(self, dateList, todaysDate):
+        if todaysDate == True or todaysDate == False:
+            todaysDate = str(datetime.datetime.now().date())
+        with open("Stock Data/" + self.__stockExchange + "/" + todaysDate + "/" + self.__stockCode + ".csv", "r") as csvFile:
+            reader = csv.reader(csvFile)
+            for row in reader:
+                self.__rawStockData.append(row)
+            try:
+                del self.__rawStockData[0]
+            except:
+                print "ERROR: Stock data file", self.__stockCode, "is empty"
+                return False
+        self.__modStockData = self.__rawStockData
+        
+        #Puts actual date rather than numeric equivalent from start equivelant in [6]
+        for x in range(len(self.__modStockData)):
+            self.__modStockData[x][0] = self.convert_date(self.__modStockData[x][0])
+        
+        for x in range(len(self.__modStockData)):
+            for y in range(5):
+                if y != 0:
+                    if self.__modStockData[x][y] == "-":
+                        self.__modStockData[x][y] = "*"
+                    else:
+                        try:
+                            self.__modStockData[x][y] = float(self.__modStockData[x][y])
+                        except:
+                            print "ERROR: Cannot add value", self.__modStockData[x][y], "as a float"
+
+        for x in range(len(self.__modStockData)):
+            if self.__modStockData[x][5] != "*":
+                self.__modStockData[x][5] = int(self.__modStockData[x][5])
+            if self.__modStockData[x][5] == "0":
+                self.__modStockData[x][5] = int(0)
+                
+        #endDatePos = self.__modStockData.index(self.__modStockData[0])
+
+        if len(self.__modStockData) == 0:
+            return "Empty"
+        
+        startDatePos = dateList.index(self.__modStockData[len(self.__modStockData) - 1][0])
+        #pointer = endDatePos
+        pointer = 0
+        dataPointer = 0
+        while len(dateList) + pointer != startDatePos:
+            if dateList[pointer] == self.__modStockData[dataPointer][0]:
+                pointer -= 1
+                dataPointer += 1
+            else:
+                self.__modStockData.insert(dataPointer, [dateList[pointer], "*", "*", "*", "*", "*"])
+                pointer -= 1
+                dataPointer += 1
+
+        #Gets rid of excess dates
+        while self.__modStockData[0][0] != todaysDate:
+            del self.__modStockData[0]
+        del self.__modStockData[0]
+
+##        for item in self.__modStockData:
+##            print item
+
+        ##################################################
+        ##Appends the ratio changes of Open, High, Low, Close and Volume
+        ##################################################
+
+        for column in [1,2,3,4,5]:
+            #End refers to the most recent date, and start refers to the date where the change originates from
+            returnList = []
+            listDone = False
+            endVal = 0
+            startVal = 1
+            while startVal < len(self.__modStockData):
+                startVal = endVal + 1
+                while startVal < len(self.__modStockData) and self.__modStockData[startVal][column] == "*" :
+                    startVal += 1
+                if self.__modStockData[endVal][column] == "*":
+                    returnList.append(1.0)
+                else:
+                    try:
+                        returnList.append(float(self.__modStockData[endVal][column])/float(self.__modStockData[startVal][column]))
+                    except:
+                        returnList.append(1.0)
+                endVal += 1
+
+            #print len(returnList)
+
+            ratioChangeCounter = 0
+            for ratioChange in returnList:
+                self.__modStockData[ratioChangeCounter].append(ratioChange)
+                ratioChangeCounter += 1
+
+        ##################################################
+        ##Appends the 50 and 15 day simple moving averages
+        ##################################################
+
+        loopCount = 0
+        for movingAverage in [15, 50]:
+            #print "Working out 15 day average:"
+            #End refers to the most recent date, and start refers to the date where the change originates from
+            returnList = []
+            listDone = False
+            endVal = 0
+            startVal = 1
+            while startVal < len(self.__modStockData):
+                startVal = endVal + movingAverage
+                totalCount = 0
+                currentAverage = 0.0
+                #print "new calc"
+                lastVal = 0.0
+                for averageItem in range(endVal, startVal):
+                    try:
+                        currentAverage += self.__modStockData[averageItem][1]
+                        #print self.__modStockData[averageItem][1]
+                        lastVal = self.__modStockData[averageItem][1]
+                        totalCount += 1
+                    except:
+                        if lastVal != 0.0:
+                            currentAverage += lastVal
+                            #print lastVal
+                            totalCount += 1
+                    try:
+                        currentAverage += self.__modStockData[averageItem][4]
+                        #print self.__modStockData[averageItem][4]
+                        lastVal = self.__modStockData[averageItem][4]
+                        totalCount += 1
+                    except:
+                        if lastVal != 0.0:
+                            currentAverage += lastVal
+                            #print lastVal
+                            totalCount += 1
+                #print "---------------"
+                try:
+                    returnList.append(currentAverage/totalCount)
+                except:
+                    returnList.append("*")
+                endVal += 1
+
+            #print len(returnList)
+
+            ratioChangeCounter = 0
+            for ratioChange in returnList:
+                self.__modStockData[ratioChangeCounter].append(ratioChange)
+                ratioChangeCounter += 1
+    
+        return True
+
+    def locate_crossovers(self, column1Num, column2Num):
+        try:
+            lastBool = self.__modStockData[0] > self.__modStockData[1]
+        except:
+            print "Error, list length error with", self.__stockCode
+            return False
+        for dataRow in range(len(self.__modStockData) - 2):
+            try:
+                currentBool = self.__modStockData[dataRow][column1Num] > self.__modStockData[dataRow+1][column2Num]
+                #self.__modStockData.print_data_line(dataRow, True)
+                #print self.__modStockData[dataRow][0], currentBool, self.__modStockData[dataRow][column1Num], self.__modStockData[dataRow][column2Num]
+                if lastBool != currentBool:
+                   self.__crossovers.append(dataRow)
+                   lastBool = currentBool
+            except:
+                pass
+        return list(self.__crossovers)
+
+    def open_google_page(self):
+        webbrowser.open("https://www.google.co.uk/finance?q=" + self.__stockExchange + ":" + self.__stockCode)
+        time.sleep(1)
+
+    #For daily pickings only
+    def download_daily_picking(self, itemNum, openInBrowser):
+        todaysDate = str(datetime.datetime.now().date())
+        
+        savePath = os.path.abspath("Stock Data/Daily Pickings/" + todaysDate)
+        try:
+            os.makedirs(savePath)
+        except:
+            pass
+            
+        savePath = os.path.abspath("Stock Data/Daily Pickings/" + self.__stockExchange + todaysDate) + "/" + str(itemNum)
+        url = "http://www.google.com/finance/historical?output=csv&q=" + self.__stockExchange + ":" + self.__stockCode.lower()
+        try:
+            stockFile = urllib.URLopener()
+            stockFile.retrieve(url, savePath)
+            print "Stock found and csv downloaded '" + self.__stockCode + "', " + self.__stockExchange + "', put into daily pickings"
+        except:
+            print "ERROR: No stock daily pickings data found for '" + self.__stockCode + "'" + "', " + self.__stockExchange
+
+        if openInBrowser:
+            webbrowser.open("https://www.google.co.uk/finance?q=" + self.__stockExchange + ":" + self.__stockCode)
+        
+                    
+    def __standard_deviation(self, inpList, echo):
+        lenList = len(inpList)
+        if echo: print ""
+        if echo: print "inpList", inpList
+        numerator = 0
+        for item in inpList:
+            numerator += item
+        if echo: print "numerator", numerator
+        qFrac = numerator/(lenList)
+        if echo: print "qFrac", qFrac
+        bigNumerator = 0
+        for item in inpList:
+            bigNumerator += (item - qFrac)**2
+        if echo: print "bigNumerator", bigNumerator
+        if echo:
+            print "standardDeviation", math.sqrt(bigNumerator/float(lenList))
+        return math.sqrt(bigNumerator/lenList)
+
+    #Currently only able to calculate standard deviation of past inc int(previous) days
+    #Currently uses the ratio changes ONLY
+    def return_column_SD(self, previous, column, column2, echo):
+        relevantPrevious = []
+        relevantPrevious2 = []
+        previousFloat = 0.0
+        previousCounter = previous
+        currentPrevious = previous 
+        if len(self.__modStockData) < previous:
+            return False
+        while len(relevantPrevious) < previous:
+            try:
+                while self.__modStockData[previousCounter][column] == "*":
+                    previousCounter += 1
+                relevantPrevious.append(self.__modStockData[previousCounter][column])
+            except:
+                print "ERROR with", self.__stockCode + ", skipping SD calc" 
+                return False
+            currentPrevious -= 1
+            previousCounter = currentPrevious
+        if column2 != False:
+            previousFloat = 0.0
+            previousCounter = previous
+            currentPrevious = previous
+            while len(relevantPrevious2) < previous:
+                try:
+                    while self.__modStockData[previousCounter][column2] == "*":
+                        previousCounter += 1
+                    relevantPrevious2.append(self.__modStockData[previousCounter][column2])
+                except:
+                    print "ERROR with", self.__stockCode + ", skipping SD calc" 
+                    return False
+                currentPrevious -= 1
+                previousCounter = currentPrevious
+            relevantPrevious += relevantPrevious2
+        return self.__standard_deviation(relevantPrevious, echo)
+    
+
+    def return_weighted_average_SD(self, previous, column1, column2, echo):
+        SDList = []
+        divisor = 0.0
+        for previousNum in range(1, previous+1):
+            currentDivisor = math.sqrt(previousNum)
+            SDList.append(float(self.return_column_SD(previousNum, column1, column2, echo)/currentDivisor))
+            divisor += currentDivisor
+        if echo: print "Weighted SD list:", SDList
+        total = 0.0
+        for item in SDList:
+            total += item
+        if echo: print "weighted average SD:", total/divisor
+        return total/divisor
+        
+        
+
+    def checkVolume(self, previous):
+        returnBool = True
+        if len(self.__modStockData) < previous:
+            return False
+        for volCheck in range(previous):
+##            print self.__modStockData[volCheck][5]
+            if self.__modStockData[volCheck][5] == 0:
+                returnBool = False
+        return returnBool
+            
+
+
+    def return_max_price_change_SD(self, previous, echo):
+        relevantPrevious = []
+        previousCounter = 0
+
+        while len(relevantPrevious) < previous:
+            if self.__modStockData[previousCounter][1] != "*":
+                sortedList = sorted(self.__modStockData[previousCounter][1:5])
+                #print sortedList
+                relevantPrevious.append(sortedList[-1]-sortedList[0])
+                #print len(relevantPrevious)
+            previousCounter += 1
+        return self.__standard_deviation(relevantPrevious, echo)
+
+
+    #############################
+    ##RSS Functions
+    #############################
+    
+    def RSS_init(self, userAgent):
+        todaysDate = str(datetime.datetime.now().date())
+        self.__RSSstockUrl = "https://www.google.co.uk/finance/company_news?q=" + self.__stockExchange + ":" + self.__stockCode + "&output=rss"
+        
+        currentSavePath = os.path.abspath("Stock Data/" + self.__stockExchange + "/RSSData/" + todaysDate)
+        mergedSavePath = os.path.abspath("Stock Data/" + self.__stockExchange + "/RSSData/merged")
+        if os.path.exists(currentSavePath) == False:
+            print "Creating RSS directory for current date"
+            os.makedirs(currentSavePath)
+        if os.path.exists(mergedSavePath) == False:
+            print "Creating RSS directory for current date"
+            os.makedirs(mergedSavePath)
+
+        #Creating/loading current merged file
+        if os.path.isfile(mergedSavePath + "/" + self.__stockCode + ".json") == False:
+            print "No merged RSS file for", self.__stockCode + ", creating new file"
+            with open(mergedSavePath + "/" + self.__stockCode + ".json", 'w') as outfile:
+                json.dump({}, outfile)
+
+        with open(mergedSavePath + "/" + self.__stockCode + ".json") as data_file:
+            self.__RSSDataDict = json.load(data_file)
+            self.__RSSDataDict = dict(self.__RSSDataDict)
+            
+        if os.path.isfile(currentSavePath + "/" + self.__stockCode + ".json") == False:
+            currentVersion = feedparser.parse(self.__RSSstockUrl, agent = userAgent)
+            time.sleep(random.random()*0.27681238)
+            
+            currentVersion = feedparser.parse(self.__RSSstockUrl)
+            for entry in currentVersion["entries"]:
+                if entry["published"] + "#0" not in self.__RSSDataDict:
+                    #self.__RSS_display_update(entry, currentVersion["feed"]["title"])
+                    counter = 0
+                    dictTitle = entry["published"] + "#" + str(counter)
+                    while dictTitle in self.__RSSDataDict:
+                        counter += 1
+                        dictTitle = entry["published"] + "#" + str(counter)
+                    self.__RSSDataDict[dictTitle] = {"title": entry["title"], "published": entry["published"],
+                                                       "summary": BeautifulSoup(entry["summary"], 'html.parser').get_text().split("\n")[3],
+                                                       "link": entry["link"]}
+                else:
+                    print "Updating current entry for", self.__stockCode
+            with open(mergedSavePath + "/" + self.__stockCode + ".json", 'w') as outfile:
+                json.dump(self.__RSSDataDict, outfile)
+            
+            for entry in currentVersion["entries"]:
+                counter = 0
+                dictTitle = entry["published"] + "#" + str(counter)
+                while dictTitle in self.__currentRSSDD:
+                    counter += 1
+                    dictTitle = entry["published"] + "#" + str(counter)
+                self.__currentRSSDD[dictTitle] = {"title": entry["title"], "published": entry["published"],
+                                                   "summary": BeautifulSoup(entry["summary"], 'html.parser').get_text().split("\n")[3],
+                                                   "link": entry["link"]}
+            with open(currentSavePath + "/" + self.__stockCode + ".json", 'w') as outfile:
+                json.dump(self.__currentRSSDD, outfile)
+        else:
+            with open(currentSavePath + "/" + self.__stockCode + ".json") as data_file:
+                self.__currentRSSDD = json.load(data_file)
+                self.__currentRSSDD = dict(self.__currentRSSDD)
+            
+##        print self.__currentRSSDD.keys()
+
+
+    #Only writes merged dict
+    def __RSS_write_dict(self):
+        with open("Stock Data/" + self.__stockExchange + "/RSSData/Merged/" + self.__stockCode + ".json", 'w') as outfile:
+            json.dump(self.__RSSDataDict, outfile)
+
+
+    def __RSS_add_data_to_dict(self, entry):
+        title = entry["title"]
+        published = entry["published"]
+        summary = BeautifulSoup(entry["summary"], 'html.parser').get_text().split("\n")[3]
+        link = entry["link"]
+        counter = 0
+        dictTitle = entry["published"] + "#" + str(counter)
+        while dictTitle in self.__RSSDataDict:
+            counter += 1
+            dictTitle = entry["published"] + "#" + str(counter)
+        self.__RSSDataDict[dictTitle] = {"title": title, "published": published, "summary": summary, "link": link}
+
+
+    #cVP stands for current version parsed, for printing the useful text
+    def __RSS_display_update(self, entry, stockTitle, isBeep):
+        print ""
+        print "----------------------------------------------------"
+        #print new tileA, titleB, published, summary, link
+        print stockTitle
+        print ""
+        print "Title:"
+        print entry["title"]
+        print ""
+        print "Date and Time of publishing"
+        print entry["published"]
+        print ""
+        print "Story Summary:"
+        print entry["summary"]
+        print ""
+        print "Link:"
+        print entry["link"]
+        print "----------------------------------------------------"
+        if self.openLink: webbrowser.open(entry["link"])
+        if isBeep: winsound.Beep(1500, 1000)
+
+
+    #Returns True if an update is needed, False if not
+    def RSS_check_for_updates(self, userAgent):
+        #oldVersion = __mostRecentParsed
+        returnFollower = False
+        currentVersion = feedparser.parse(self.__RSSstockUrl)
+        for entry in currentVersion["entries"]:
+            if entry["published"] + "#0" not in self.__RSSDataDict:
+                self.__RSS_display_update(entry, currentVersion["feed"]["title"], True)
+                self.__RSS_add_data_to_dict(entry)
+                self.__RSS_write_dict()
+                returnFollower = True
+        return returnFollower
+
+    #keywords is a list of words, which causes a trigger when requiredNum of them are present
+    #encompass = "current" or "merged", depending on which stored RSS filetype the search is desired for
+    def RSS_str_search(self, keywords, requiredNum, encompass, userAgent, echo):
+        if requiredNum > len(keywords):
+            print "ERROR: please input a smaller requiredNum than len(keywords)"
+            return False
+##        if echo: print "Searching for words", keywords, "in RSS feed for", self.__stockCode
+##        currentVersion = feedparser.parse(self.__RSSstockUrl, agent = userAgent)
+##        time.sleep(random.random()*0.27681238)
+        returnBool = False
+        triggerCount = 0
+        currentSearchDict = []
+        if encompass.lower() == "merged":
+            currentSearchDict = self.__RSSDataDict
+        if encompass.lower() == "current":
+            currentSearchDict = self.__currentRSSDD
+            
+        for entry in currentSearchDict:
+            trigger = False
+            wordsFound = []
+            for keyword in keywords:
+                if keyword.upper() in currentSearchDict[entry]["title"].upper():
+##                    if echo: print "'" + keyword + "'", "found in title for story dated", entry["published"]
+                    trigger = True
+                    wordsFound.append(keyword)
+                if keyword.upper() in currentSearchDict[entry]["summary"].upper():
+##                    if echo:
+##                        print "'" + keyword + "'",
+##                        if trigger == True:
+##                            print "also",
+##                        print "found in summary for story dated", entry["published"]
+                    if trigger == False:
+                        wordsFound.append(keyword)
+                    
+            if len(wordsFound) >= requiredNum:
+                if echo: print "Result found:"
+                if echo: self.__RSS_display_update(currentSearchDict[entry], "RSS feed for " + self.__stockCode, False)
+                returnBool = True
+                triggerCount += 1
+        return returnBool, triggerCount
+                
+
+    def add_associate_data(self, key, value):
+        if key in self.__associateData:
+            print "ERROR:", self.__stockCode, "given key already present of key:", key, "value:", value
+            return False
+        #print "KEY:", key
+        #print self.__associateData
+        self.__associateData[key] = value
+        return True
+
+    def retrieve_associate_data(self, key):
+        if key not in self.__associateData:
+            print "ERROR:", self.__stockCode, "given key not present, key:", key, "value:", value
+            return False
+        return self.__associateData[key]
+
+    #abbrv
+    def rad(self, key):
+        return self.retrieve_associate_data(key)
+        
+
+    #Prints data line with info beforehand
+    #Previous = 0 is the current data line
+    #Direction: True = recent, False = (negative)
+    def print_data_line(self, previous, direction):
+##        try:
+        if direction == False:
+            printLine = list(self.__modStockData[-previous])
+        else:
+            printLine = list(self.__modStockData[previous])
+##        except:
+##            print "Cannot print, not enough results"
+##            return False
+        print "--------------------------------------------------"
+        print "Date:", printLine[0],
+        print "Open:", printLine[1],
+        print "High:", printLine[2],
+        print "Low:", printLine[3],
+        print "Close:", printLine[4],
+        print "Volume:", printLine[5]
+        try: print "Open Change:", printLine[6],
+        except: pass
+        try: print "High Change:", printLine[7],
+        except: pass
+        try: print "Low Change:", printLine[8],
+        except: pass
+        try: print "Close Change:", printLine[9],
+        except: pass
+        try: print "Volume Change:", printLine[10]
+        except: pass
+        try: print "15 day moving average:", printLine[11],
+        except: pass
+        try: print "50 day moving average:", printLine[12]#,
+        except: pass
+        return True
+##        try: print "bool: 15 day moving average > 50 day moving average", printLine[13]
+##        except: pass
+
+    def print_stock_info(self, numLinesToPrint):
+        print self.__stockCode
+        for x in range(numLinesToPrint):
+            self.print_data_line(x, True)
+
+    def return_stock_code(self):
+        return self.__stockCode
+
+
+#TEMP ONLY
+def create_date_list(startDate):
+    dateList = []
+    todaysDate = str(datetime.datetime.now().date())
+    todaysDateNewFormat = todaysDate[8:] + "-" + todaysDate[5:7] + "-" + todaysDate[:4]
+    start = datetime.datetime.strptime(startDate, '%d-%m-%Y').date()
+    end = datetime.datetime.strptime(todaysDateNewFormat, '%d-%m-%Y').date()
+    step = datetime.timedelta(days=1)
+
+    while start <= end:
+        dateList.append(str(start))
+        start += step
+    return dateList
+dateList = create_date_list("01-01-2000")
+
+
+
+##testStock = stock("LSE", "ADM", "", False)
+######testStock.add_associate_data("TEST KEY", "TEST VARIABLE")
+######print testStock.retrieve_associate_data("TEST KEY")
+####
+##testStock.load_price_sheet(dateList, "2016-05-05")
+##crossPoints = testStock.locate_crossovers(11, 12)
+##print crossPoints
+
+#for crossPoint in crossPoints:
+    #testStock.print_data_line(crossPoint, True)
+
+##testStock.RSS_init("Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; WOW64; Trident/6.0)")
+##print testStock.RSS_str_search(["coaster, with its future"], 1,
+##                               "Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; WOW64; Trident/6.0)", False)
+
+#testStock.RSS_check_for_updates()
+
+
+##dateList = create_date_list("01-01-2000")
+##testStock = stock("LON", "LAKE")#, "", False)
+##testStock.RSS_init("Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; WOW64; Trident/6.0)")
+##print testStock.RSS_str_search(["feel like an airport transit"], 1, "current", 
+##                               "Mozilla/5.0 (compatible; MSIE 10.0; Windows NT 6.1; WOW64; Trident/6.0)", False)
+
+
+    
+##testStock.load_price_sheet(dateList, "2016-05-21")
+##print testStock.return_weighted_average_SD(5, 7, 8, True)
+
+
+##crossPoints = testStock.locate_crossovers(11, 12)
+##for crossPoint in crossPoints:
+##    testStock.print_data_line(crossPoint, True)
+    
+##for x in range(20):
+##    testStock.print_data_line(x, True)
+##print testStock.return_column_SD(10, 1, True)
+
+####print ""
+####print testStock.checkVolume(10)
+####testStock.return_column_SD(3, 1, True)
+####testStock.return_column_SD(3, 4, True)
+####testStock.return_max_price_change_SD(3, True)
+##
+##
+##
+###Find stocks where the price deviation of the open price is much larger than that of the close price or vice versa
+
+
+
+
+
+##print 1 / math.sqrt(2)
+##print 1 / math.sqrt(3)
+##print 1 / math.sqrt(4)
+##print 1 / math.sqrt(5)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
